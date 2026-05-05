@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 音樂譜面轉錄工作室 | Music Score Studio</title>
+    <!-- 使用 Tailwind CSS 快速打造高階質感 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8f9fa; }
+        .drop-zone { border: 2px dashed #e2e8f0; transition: all 0.3s ease; }
+        .drop-zone.active { border-color: #4a5568; background-color: #edf2f7; }
+        .japanese-clean { color: #2d3748; letter-spacing: 0.05em; }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-6">
+
+    <div class="w-full max-w-2xl bg-white rounded-2xl shadow-sm p-10 border border-gray-100">
+        <!-- 標題區域 -->
+        <header class="mb-10 text-center">
+            <h1 class="text-2xl font-medium text-gray-800 mb-2 japanese-clean">AI 音樂譜面轉錄工作室</h1>
+            <p class="text-sm text-gray-400 font-light">將影片內容自動轉化為高品質 A4 樂譜 PDF</p>
+        </header>
+
+        <!-- 上傳區域 -->
+        <div id="drop-zone" class="drop-zone rounded-xl p-12 text-center cursor-pointer mb-8 group">
+            <input type="file" id="video-input" class="hidden" accept="video/mp4,video/x-m4v,video/*">
+            <div class="space-y-4">
+                <svg class="w-12 h-12 mx-auto text-gray-300 group-hover:text-gray-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                </svg>
+                <p class="text-gray-500 text-sm font-light">將演奏影片拖曳至此，或 <span class="text-gray-800 font-normal underline">點擊上傳</span></p>
+            </div>
+        </div>
+
+        <!-- 狀態與進度顯示 -->
+        <div id="status-container" class="hidden space-y-6">
+            <div class="flex items-center justify-between text-sm mb-2">
+                <span id="status-text" class="text-gray-600 font-light italic">正在準備處理...</span>
+                <span id="progress-percent" class="text-gray-800">0%</span>
+            </div>
+            <div class="w-full bg-gray-100 rounded-full h-1">
+                <div id="progress-bar" class="bg-gray-800 h-1 rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+            <!-- 歌詞辨識預覽 (AI 亮點) -->
+            <div class="bg-gray-50 rounded-lg p-4 border border-gray-100">
+                <p class="text-xs text-gray-400 mb-2 uppercase tracking-widest">AI 歌詞辨識預覽</p>
+                <div id="lyrics-preview" class="text-sm text-gray-600 font-light leading-relaxed">等待處理中...</div>
+            </div>
+        </div>
+
+        <!-- 結果下載 -->
+        <div id="result-container" class="hidden text-center mt-8">
+            <a id="download-btn" href="#" target="_blank" class="inline-block bg-gray-800 text-white px-8 py-3 rounded-full text-sm font-light tracking-widest hover:bg-black transition-all shadow-lg">
+                下載高清 PDF 樂譜
+            </a>
+            <p class="mt-4 text-xs text-gray-300">產出的文件已針對 A4 列印優化</p>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const videoInput = document.getElementById('video-input');
+        const statusContainer = document.getElementById('status-container');
+        const statusText = document.getElementById('status-text');
+        const lyricsPreview = document.getElementById('lyrics-preview');
+        const progressBar = document.getElementById('progress-bar');
+        const resultContainer = document.getElementById('result-container');
+        const downloadBtn = document.getElementById('download-btn');
+
+        // 點擊上傳邏輯
+        dropZone.onclick = () => videoInput.click();
+
+        videoInput.onchange = (e) => {
+            if (e.target.files.length > 0) handleUpload(e.target.files[0]);
+        };
+
+        // 拖曳邏輯
+        dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('active'); };
+        dropZone.ondragleave = () => dropZone.classList.remove('active');
+        dropZone.ondrop = (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('active');
+            if (e.dataTransfer.files.length > 0) handleUpload(e.dataTransfer.files[0]);
+        };
+
+        async function handleUpload(file) {
+            // 初始化介面
+            dropZone.classList.add('hidden');
+            statusContainer.classList.remove('hidden');
+            statusText.innerText = "正在上傳影片至後端引擎...";
+
+            const formData = new FormData();
+            formData.append('video', file);
+
+            try {
+                // 1. 調用 FastAPI 上傳接口
+                const response = await fetch('/api/v1/upload', { method: 'POST', body: formData });
+                const { task_id } = await response.json();
+
+                // 2. 開始輪詢進度
+                pollStatus(task_id);
+            } catch (error) {
+                statusText.innerText = "上傳失敗，請檢查後端連線";
+            }
+        }
+
+        async function pollStatus(taskId) {
+            try {
+                const response = await fetch(`/api/v1/status/${taskId}`);
+                const data = await response.json();
+
+                statusText.innerText = data.status;
+                
+                // 模擬進度條更新 (實作中可根據後端回傳的 step 數計算)
+                if (data.status.includes("Extracting")) updateProgress(30);
+                if (data.status.includes("Stitching") || data.status.includes("PDF")) updateProgress(70);
+
+                if (data.status === "Completed") {
+                    updateProgress(100);
+                    statusText.innerText = "轉錄完成";
+                    resultContainer.classList.remove('hidden');
+                    downloadBtn.href = data.download_url;
+                } else if (data.status.startsWith("Failed")) {
+                    statusText.innerText = "處理出錯，請重試";
+                } else {
+                    setTimeout(() => pollStatus(taskId), 2000);
+                }
+            } catch (e) {
+                setTimeout(() => pollStatus(taskId), 3000);
+            }
+        }
+
+        function updateProgress(val) {
+            progressBar.style.width = val + '%';
+            document.getElementById('progress-percent').innerText = val + '%';
+        }
+    </script>
+</body>
+</html>
